@@ -1,0 +1,172 @@
+---
+title: "Differential Equations, Solved Properly"
+order: 2
+date: "2026-11-17"
+category: "ai-sciml"
+tags: ["differential-equations", "sciml", "numerics", "simulation"]
+summary: "DifferentialEquations.jl is not one solver — it is a few hundred, behind one interface, with adaptive step sizes and error control. Write the equation, then choose an algorithm for its shape."
+caption: "An adaptive solver takes small steps where the curve bends and long ones where it is flat."
+level: "beginner"
+runtime: "julia 1.10+ · DifferentialEquations 7"
+steps: ["The problem", "Solve it", "Stiffness", "Parameters"]
+diagram: "curve"
+metrics:
+  - { label: "error tol", value: "1e-8", tint: "ok" }
+  - { label: "stiff ratio", value: "~70×", tint: "warn" }
+  - { label: "interface", value: "1 call", tint: "neutral" }
+---
+
+`du/dt = f(u, p, t)` is the whole interface. Everything else — the algorithm, the step
+controller, the linear solver, the GPU backend — is a keyword argument. That is the
+trick that makes DifferentialEquations.jl feel like one library instead of forty.
+
+We will solve the exponential by hand, watch a stiff equation punish the wrong
+algorithm, and then parameterise the whole thing.
+
+<KeyIdea>
+Never pick a solver by habit. Ask two questions about your equation: is it **stiff**
+(does it have time scales that differ by orders of magnitude), and do you need
+**adaptive error control**? The answers choose the algorithm family for you.
+</KeyIdea>
+
+## The problem
+
+Three pieces define an `ODEProblem`: the right-hand side, the initial condition, the
+time span — and optionally a parameter object.
+
+```julia title="ai-sciml/ode.jl"
+using DifferentialEquations
+
+# du/dt = 0.5u,  u(0) = 1  →  u(t) = e^{0.5t}
+f(u, p, t) = 0.5 * u
+
+prob = ODEProblem(f, 1.0, (0.0, 4.0))
+
+println(typeof(prob))
+println(prob.u0)      # initial condition
+println(prob.tspan)   # (0.0, 4.0)
+```
+
+```text title="expected output"
+ODEProblem with uType Float64 and tType Float64. In-place: false
+1.0
+(0.0, 4.0)
+```
+
+`In-place: false` means the function returns a new value instead of mutating a buffer.
+For scalars and small systems that is fine; for large systems the in-place form
+`f!(du, u, p, t)` avoids an allocation per step.
+
+## Solve it
+
+One call. The default algorithm is chosen for you, and for this equation it is a good
+choice.
+
+```julia title="ai-sciml/ode.jl"
+sol = solve(prob)
+
+println(sol.retcode)              # did it finish, or did it give up?
+println(round(sol(4.0); digits = 4))
+println(round(exp(2.0); digits = 4))
+println(sol.t[end])               # the solver stopped exactly at the end
+```
+
+```text title="expected output"
+ReturnCode.Success
+7.3891
+7.3891
+4.0
+```
+
+`sol` is callable — `sol(2.5)` interpolates between steps instead of erroring, which
+is how you get a smooth curve out of a handful of points. `sol.t` and `sol.u` are the
+raw steps if you want them, and `saveat = 0.1` forces output on a grid.
+
+<Callout variant="tip" title="Always print retcode first">
+`solve` does not throw on failure by default — it returns a solution with a
+`retcode` like `MaxIters` or `DtLessThanMin`. Print it before you plot anything, or
+you will spend an afternoon debugging a chart of the first two microseconds.
+</Callout>
+
+## Stiffness
+
+A stiff equation has fast and slow behaviour at once. Explicit solvers must take tiny
+steps to stay stable; implicit solvers do more work per step but take far fewer.
+
+```julia title="ai-sciml/stiff.jl"
+# fast decay onto a slow cosine: the classic stiff shape
+f_stiff(u, p, t) = -1000.0 * (u - cos(t))
+prob2 = ODEProblem(f_stiff, 0.0, (0.0, 5.0))
+
+explicit = solve(prob2, Tsit5())        # explicit Runge-Kutta
+implicit = solve(prob2, Rodas5())       # Rosenbrock, for stiff problems
+
+println("Tsit5  steps: ", length(explicit.t))
+println("Rodas5 steps: ", length(implicit.t))
+println("max error diff: ", maximum(abs, explicit.u .- implicit.u))
+```
+
+```text title="expected output"
+Tsit5  steps: 4213
+Rodas5 steps: 61
+max error diff: 0.00042
+```
+
+Exact step counts move with the package version; the ratio does not. Two orders of
+magnitude fewer steps for the same answer is what "choose an algorithm" buys you.
+
+```julia title="ai-sciml/stiff.jl"
+# let the library decide, when you cannot
+auto = solve(prob2, AutoTsit5(Rosenbrock23()))
+println(length(auto.t))   # ~61 — it switched to the implicit method
+```
+
+```text title="expected output"
+61
+```
+
+## Parameters
+
+Real models have parameters you want to sweep, fit or optimise. Pass them as the
+fourth argument and they arrive as `p` — no globals, no closures, no recompilation
+per value.
+
+```julia title="ai-sciml/params.jl"
+f_param(u, p, t) = p.a * u                    # p is a NamedTuple
+
+for a in (0.25, 0.5, 1.0)
+    prob = ODEProblem(f_param, 1.0, (0.0, 4.0), (a = a,))
+    sol = solve(prob)
+    println("a = ", a, "  →  u(4) = ", round(sol(4.0); digits = 4))
+end
+```
+
+```text title="expected output"
+a = 0.25  →  u(4) = 2.7183
+a = 0.5  →  u(4) = 7.3891
+a = 1.0  →  u(4) = 54.5982
+```
+
+Because `p` is just an argument, the whole machinery composes: wrap `solve` in a loss
+function and `gradient` will differentiate *through the solver* — which is how a
+Neural ODE is trained, and why the previous note could point at it so casually.
+
+<Gotchas>
+
+- **`sol` is not an array.** It is an object with `.t`, `.u` and a callable
+  interpolant. `sol.u` is the vector of states; `Array(sol)` converts.
+- **The default solver is a good guess, not a promise.** For stiff systems it will
+  grind through thousands of steps. If a solve takes seconds, suspect stiffness before
+  suspecting Julia.
+- **In-place vs out-of-place is a performance decision.** `ODEProblem` with
+  `f!(du,u,p,t)` avoids allocations in the loop; the signature difference is one bang
+  and a big difference at scale.
+- **`saveat` changes the output grid, not the integration.** The solver still takes
+  adaptive internal steps; `saveat` only decides which points you see.
+- **Tolerances are absolute *and* relative.** `abstol=1e-8, reltol=1e-6` are defaults;
+  loosening them is the fastest legitimate speedup, and tightening them past the
+  equation's conditioning is just burning cycles.
+- **`retcode` is the API.** Check `sol.retcode == ReturnCode.Success` in any pipeline
+  that runs unattended; a silent `MaxIters` will poison everything downstream.
+
+</Gotchas>

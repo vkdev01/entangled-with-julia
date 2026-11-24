@@ -4,9 +4,15 @@
 
 const SCRIPTS = [
     "basics/indexing_dispatch.jl",
+    "basics/types.jl",
+    "basics/packages.jl",
     "ai-sciml/flux_nn.jl",
+    "ai-sciml/ode.jl",
+    "ai-sciml/stats.jl",
     "quantum/bell_yao.jl",
+    "quantum/gates.jl",
     "experiments/loop_bench.jl",
+    "experiments/stability.jl",
 ]
 
 const HERE = @__DIR__

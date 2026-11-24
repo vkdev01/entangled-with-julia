@@ -1,0 +1,159 @@
+---
+title: "Your Project Is a Folder"
+order: 3
+date: "2026-11-19"
+category: "basics"
+tags: ["pkg", "project-toml", "reproducibility", "setup"]
+summary: "No virtualenv, no conda, no global site-packages to corrupt. A Julia environment is a folder with two TOML files, and once you see that, dependency hell loses most of its teeth."
+caption: "Activate a project, instantiate it, and every import resolves inside that folder."
+level: "beginner"
+runtime: "julia 1.10+"
+steps: ["Environments, not installs", "Read Project.toml", "Instantiate & pin", "Ship it"]
+diagram: "pipeline"
+metrics:
+  - { label: "files", value: "2", tint: "neutral" }
+  - { label: "manifest", value: "pinned", tint: "ok" }
+  - { label: "global state", value: "none", tint: "ok" }
+---
+
+Python has a global package store and a decade of blog posts about escaping it. Julia
+has environments: a folder, a `Project.toml`, a `Manifest.toml`, and a `--project`
+flag. That is the whole system.
+
+This is the setup note — the one you read once and then copy into every repo.
+
+<KeyIdea>
+`Project.toml` is what you *asked for* (dependencies plus version ranges).
+`Manifest.toml` is what you *got* (exact versions, git trees, hashes). Commit both for
+applications; commit only `Project.toml` for libraries.
+</KeyIdea>
+
+## Environments, not installs
+
+An environment is a named set of package versions. Activating one changes what `using`
+resolves to — nothing is installed "globally" in the Python sense.
+
+```julia title="basics/packages.jl"
+using Pkg
+
+Pkg.activate(".")                 # make this folder the active environment
+println(Base.active_project())    # /path/to/project/Project.toml
+
+Pkg.status()                      # what this environment currently has
+```
+
+```text title="expected output"
+Activating project at `~/entangled-with-julia/julia`
+/home/you/entangled-with-julia/julia/Project.toml
+Status `~/entangled-with-julia/julia/Project.toml`
+  [6e4b80f9] BenchmarkTools v1.5.0
+  [0c46a032] DifferentialEquations v7.13.0
+  [587475ba] Flux v0.16.4
+```
+
+The active project is per-process. Two terminals can be in two different environments
+at the same time, and neither can break the other — which is the entire point.
+
+## Read Project.toml
+
+Four sections matter. The `uuid` makes the package nameable; `[deps]` records what you
+added; `[compat]` is the range you are willing to accept.
+
+```toml title="julia/Project.toml"
+name = "JuliaPlayground"
+uuid = "9f1a2c34-7b5d-4e8f-9a10-3c4d5e6f7a8b"
+version = "0.1.0"
+
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+
+[compat]
+BenchmarkTools = "1"
+Flux = "0.14, 0.15, 0.16"
+julia = "1.10"
+```
+
+<Callout variant="warn" title="Compat is not decoration">
+Without `[compat]`, `Pkg` will happily resolve to a major version that breaks your
+code, months later, on someone else's machine. `Flux = "0.14, 0.15, 0.16"` says
+"these majors, nothing newer" — and `julia = "1.10"` says the minimum language
+version. This is the cheapest reproducibility you will ever buy.
+</Callout>
+
+Adding a package writes both the `[deps]` entry and a `[compat]` line for you:
+
+```julia title="basics/packages.jl"
+Pkg.add("Flux")                       # latest compatible with your [compat]
+Pkg.add(name = "Flux", version = "0.16")   # pin a major explicitly
+Pkg.rm("Flux")                        # remove the dep and the manifest entry
+```
+
+## Instantiate & pin
+
+`instantiate` is the command that makes a checkout reproducible: it reads the
+manifest and materialises exactly those versions.
+
+```julia title="basics/packages.jl"
+Pkg.instantiate()    # install exactly what Manifest.toml says
+Pkg.resolve()        # re-resolve the manifest against Project.toml ranges
+Pkg.update()         # move forward within your [compat] ranges
+Pkg.precompile()     # pay the compile cost once, now, not at import time
+```
+
+```text title="expected output"
+Precompiling project...
+  ✓ BenchmarkTools
+  ✓ Flux
+  ✓ DifferentialEquations
+  12 dependencies successfully precompiled in 84.2 seconds
+```
+
+The manifest records git-tree hashes, so "works on my machine" becomes "works on the
+machine with this file". That is why the CI in this repo runs
+`julia --project=. -e 'using Pkg; Pkg.instantiate()'` before anything else.
+
+## Ship it
+
+A script in a project needs exactly one flag. Everything else is habit.
+
+```julia title="basics/packages.jl"
+# run a file inside this environment
+#   julia --project=. basics/indexing_dispatch.jl
+
+# a shebang that does the same, for scripts
+#   #!/usr/bin/env -S julia --project=@.
+
+# check that the environment is actually clean before you push
+Pkg.status(; mode = PKGMODE_PROJECT)   # only direct deps
+Pkg.status(; mode = PKGMODE_MANIFEST)  # the full resolved tree
+```
+
+```text title="expected output"
+Status `~/entangled-with-julia/julia/Project.toml`
+  [6e4b80f9] BenchmarkTools v1.5.0
+  [0c46a032] DifferentialEquations v7.13.0
+  [587475ba] Flux v0.16.4
+```
+
+<Gotchas>
+
+- **`julia` without `--project` is a different world.** It uses the default
+  `@v1.10` environment, where your deps are not installed. Half of all "package not
+  found" issues are a missing `--project=.`.
+- **Commit `Manifest.toml` for apps, ignore it for libraries.** An app must reproduce
+  exactly; a library must stay resolvable against other people's choices. This repo
+  ignores it — it is a set of scripts, not a published package.
+- **`Pkg.add` mutates the active environment.** Check `Base.active_project()` before
+  adding anything, or you will pollute your global env and wonder why later projects
+  see stale versions.
+- **Precompilation is cached per environment *and* per Julia version.** Upgrading Julia
+  invalidates the cache; the first `using` afterwards will feel slow. That is expected,
+  not a bug.
+- **`dev` vs `add`.** `Pkg.develop(path="..")` links a local package by path and picks
+  up edits immediately; `add` copies a versioned snapshot. Use `dev` while hacking,
+  `add` when shipping.
+- **A `Project.toml` with no `uuid` is an application, not a package.** `Pkg.test` and
+  `using MyProject` need the `uuid`; plain scripts do not.
+
+</Gotchas>

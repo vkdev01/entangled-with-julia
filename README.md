@@ -25,10 +25,16 @@ Julia with comments, the output you should see, and a **Gotchas & takeaways** se
 
 | Module | Note | What it teaches |
 | --- | --- | --- |
-| `01` basics | [Everything Starts at One](content/basics/indexing-and-dispatch.mdx) | 1-based indexing, `begin`/`end`, column-major order, multiple dispatch |
-| `02` ai-sciml | [A Neural Net You Can Actually Read](content/ai-sciml/flux-neural-net.mdx) | a 321-parameter MLP in Flux, `gradient` + `update!`, Neural ODEs |
-| `03` quantum | [Two Qubits, One Promise](content/quantum/bell-state-yao.mdx) | a Bell state in Yao.jl, amplitudes, measurement, GHZ |
-| `04` experiments | [The Loop, Timed](content/experiments/julia-vs-python.mdx) | a Julia loop vs a Python loop, with the honest caveats |
+| `01` basics | Everything Starts at One | 1-based indexing, `begin`/`end`, column-major order, multiple dispatch |
+| `01` basics | Types Are Cheap, Use Them | abstract vs concrete, parametric structs, the type lattice, type stability |
+| `01` basics | Your Project Is a Folder | `Project.toml`, `Manifest.toml`, environments, reproducible setup |
+| `02` ai-sciml | A Neural Net You Can Actually Read | a 321-parameter MLP in Flux, `gradient` + `update!`, Neural ODEs |
+| `02` ai-sciml | Differential Equations, Solved Properly | `ODEProblem`, adaptive solvers, stiffness, parameters |
+| `02` ai-sciml | Coin Flips, Honestly | `Distributions.jl`, sampling, the CLT by simulation, hypothesis tests |
+| `03` quantum | Two Qubits, One Promise | a Bell state in Yao.jl, amplitudes, measurement, GHZ |
+| `03` quantum | The Gate Zoo, Mapped | gates as matrices, unitarity, circuit composition, relative phase |
+| `04` experiments | The Loop, Timed | a Julia loop vs a Python loop, with the honest caveats |
+| `04` experiments | The 100× Bug You Can't See | type instability, `@code_warntype`, function barriers, allocations |
 
 ## Repository layout
 
@@ -48,17 +54,18 @@ Julia with comments, the output you should see, and a **Gotchas & takeaways** se
 │   ├── diagram-card.tsx      # sticky 540px card + metrics strip
 │   └── mdx-components.tsx    # <Callout> <KeyIdea> <Gotchas> <FileRef>
 ├── content/                  # ← the course itself, one folder per module
-│   ├── basics/               # 1-based indexing & multiple dispatch
-│   ├── ai-sciml/             # Flux neural network / SciML
-│   ├── quantum/              # Yao.jl Bell state
-│   └── experiments/          # benchmark: Julia loop vs Python
+│   ├── basics/               # indexing, types, environments
+│   ├── ai-sciml/             # Flux, ODEs, statistics
+│   ├── quantum/              # Bell state, gates
+│   └── experiments/          # benchmarks, type stability
 ├── julia/                    # a real Julia project, mirroring the notes
-│   ├── Project.toml
+│   ├── Project.toml          # no hand-written UUIDs — see setup.jl
+│   ├── setup.jl              # resolves every dep by name
 │   ├── run_all.jl
-│   ├── basics/indexing_dispatch.jl
-│   ├── ai-sciml/flux_nn.jl
-│   ├── quantum/bell_yao.jl
-│   └── experiments/loop_bench.{jl,py}
+│   ├── basics/{indexing_dispatch,types,packages}.jl
+│   ├── ai-sciml/{flux_nn,ode,stats}.jl
+│   ├── quantum/{bell_yao,gates}.jl
+│   └── experiments/{loop_bench,stability}.jl
 └── lib/                      # content loading, MDX pipeline, progress hook
 ```
 
@@ -81,12 +88,14 @@ Node 20+. The site reads `content/**/*.mdx` at build time — no database, no CM
 ```bash
 juliaup add release                 # Julia 1.10+
 cd julia
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. setup.jl          # resolves Flux, Yao, DiffEq, Distributions…
 julia --project=. basics/indexing_dispatch.jl
 ```
 
-`Project.toml` pins Flux, Yao, DifferentialEquations and BenchmarkTools. The first
-`instantiate` downloads a few hundred MB — that is the price of a real numerical stack.
+`setup.jl` adds every dependency **by name**, so `Pkg` writes the correct UUIDs into
+`Project.toml` — hand-typing a UUID from memory is how a repo ends up unable to
+instantiate. The first run downloads a few hundred MB; that is the price of a real
+numerical stack.
 
 Run everything in sequence:
 
@@ -109,6 +118,7 @@ date: "2026-11-24"
 category: "basics"
 tags: ["indexing", "multiple-dispatch"]
 summary: "One or two sentences shown on cards and in search results."
+order: 1                  # position within the module
 caption: "Optional — the line under the diagram."
 level: "beginner"          # optional
 runtime: "julia 1.10+"     # optional, shown in the sidebar card
@@ -198,8 +208,9 @@ python3 experiments/loop_bench.py
 
 ## Roadmap
 
-- [ ] statistics & probability: `Distributions.jl`, `StatsBase`, resampling
-- [ ] scientific computing: `ModelingToolkit`, units, `Plots`/`Makie`
+- [x] statistics & probability: `Distributions.jl`, sampling, the CLT
+- [x] scientific computing: `DifferentialEquations.jl`, stiffness, parameters
+- [x] setup & build: environments, `Project.toml`, reproducibility
 - [ ] deep learning: convolutions, `Optimisers`, training loops that scale
 - [ ] quantum: Grover, QAOA, noise models with `YaoExtensions`
 - [ ] experiments: `@turbo` vs plain loops, GPU vs CPU with `CUDA.jl`

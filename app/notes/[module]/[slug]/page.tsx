@@ -4,10 +4,8 @@ import type { Metadata } from "next";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Mdx } from "@/lib/mdx";
 import { CompleteButton } from "@/components/complete-button";
-import { DiagramCard } from "@/components/diagram-card";
-import { StepRail } from "@/components/step-rail";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { NoteFigure } from "@/components/note-figure";
+import { TocRail } from "@/components/toc-rail";
 import { getAllNotes, getNeighbours, getNote, MODULES } from "@/lib/notes";
 import { formatDate, pad } from "@/lib/utils";
 
@@ -41,86 +39,65 @@ export default async function NotePage({ params }: { params: Promise<Params> }) 
   const mod = MODULES.find((m) => m.slug === note.module);
 
   return (
-    <div className="mx-auto max-w-column px-6 py-9">
-      <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_540px] lg:gap-10">
-        {/* ------------------------------------------------ left column */}
+    <div className="mx-auto max-w-column px-6 py-10">
+      <div className="grid gap-12 lg:grid-cols-[minmax(0,660px)_236px] lg:justify-between lg:gap-10">
+        {/* ------------------------------------------------ reading column */}
         <div className="min-w-0">
-          {/* breadcrumb */}
-          <nav className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
+          <nav className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
             <Link href="/notes" className="transition-colors hover:text-foreground">
               notes
             </Link>
-            <span className="text-muted-foreground/40">/</span>
-            <span className="num">{mod?.index ?? "--"}</span>
-            <span>{mod?.title}</span>
+            <span className="text-muted-foreground/30">/</span>
+            <span className="num">{mod?.index}</span>
+            <span className="text-muted-foreground/70">{mod?.title}</span>
           </nav>
 
-          <h1 className="mt-4 text-balance text-[29px] font-semibold leading-[1.16] tracking-[-0.026em]">
+          <h1 className="mt-3 text-balance text-[31px] font-semibold leading-[1.15] tracking-[-0.028em]">
             {note.title}
           </h1>
 
-          <p className="mt-3.5 max-w-[58ch] text-pretty text-prose text-foreground/70">
+          <p className="mt-3.5 max-w-[60ch] text-pretty text-prose text-foreground/70">
             {note.summary}
           </p>
 
-          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-muted-foreground/70">
+          <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[11px] text-muted-foreground/60">
             <span className="num">{formatDate(note.date)}</span>
-            <span className="text-muted-foreground/30">·</span>
-            <span className="num">{note.readingMinutes} min read</span>
-            <span className="text-muted-foreground/30">·</span>
+            <span className="text-muted-foreground/25">·</span>
+            <span className="num">{note.readingMinutes} min</span>
+            <span className="text-muted-foreground/25">·</span>
             <span className="num">{note.codeCells} julia cells</span>
             {note.level && (
               <>
-                <span className="text-muted-foreground/30">·</span>
+                <span className="text-muted-foreground/25">·</span>
                 <span className="num">{note.level}</span>
               </>
             )}
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {(note.tags ?? []).map((t) => (
-              <Badge key={t} variant="outline" className="num">
-                {t}
-              </Badge>
-            ))}
-          </div>
+          <NoteFigure
+            kind={note.diagram ?? "pipeline"}
+            caption={note.caption ?? note.summary}
+            metrics={note.metrics ?? []}
+          />
 
-          {/* numbered step chips */}
-          <StepRail steps={note.steps ?? []} />
-
-          {/* mobile diagram */}
-          <div className="mt-8 lg:hidden">
-            <DiagramCard
-              kind={note.diagram ?? "pipeline"}
-              caption={note.caption ?? note.summary}
-              metrics={note.metrics ?? []}
-              badge={note.category}
-            />
-          </div>
-
-          {/* body */}
-          <article
-            data-note-body
-            className="prose mt-9 max-w-[64ch]"
-          >
+          <article data-note-body className="prose mt-10">
             <Mdx source={note.body} />
           </article>
 
-          <div className="mt-8 flex items-center justify-between gap-4 border-t border-border/70 pt-5">
+          <div className="mt-10 flex items-center justify-between gap-4 border-t border-border/70 pt-5">
             <CompleteButton href={note.href} />
-            <span className="num text-[10px] text-muted-foreground/60">
+            <span className="num text-[10px] text-muted-foreground/50">
               {mod?.index}.{pad(note.number)}
             </span>
           </div>
 
-          {/* prev / next */}
-          <nav className="mt-6 grid gap-2 sm:grid-cols-2">
+          <nav className="mt-4 grid gap-2.5 sm:grid-cols-2">
             {previous ? (
               <Link
                 href={previous.href}
-                className="group rounded-lg border border-border/70 px-3.5 py-3 transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
+                className="group rounded-lg border border-border/70 px-4 py-3 transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
               >
-                <span className="label-xs flex items-center gap-1.5 text-muted-foreground/70">
+                <span className="label-xs flex items-center gap-1.5 text-muted-foreground/60">
                   <ArrowLeft className="size-3" /> previous
                 </span>
                 <span className="mt-1.5 block truncate text-[13px] text-foreground/85">
@@ -128,14 +105,14 @@ export default async function NotePage({ params }: { params: Promise<Params> }) 
                 </span>
               </Link>
             ) : (
-              <div />
+              <div className="hidden sm:block" />
             )}
             {next && (
               <Link
                 href={next.href}
-                className="group rounded-lg border border-border/70 px-3.5 py-3 text-right transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
+                className="group rounded-lg border border-border/70 px-4 py-3 text-right transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
               >
-                <span className="label-xs flex items-center justify-end gap-1.5 text-muted-foreground/70">
+                <span className="label-xs flex items-center justify-end gap-1.5 text-muted-foreground/60">
                   next <ArrowRight className="size-3" />
                 </span>
                 <span className="mt-1.5 block truncate text-[13px] text-foreground/85">
@@ -146,32 +123,15 @@ export default async function NotePage({ params }: { params: Promise<Params> }) 
           </nav>
         </div>
 
-        {/* ----------------------------------------------- right column */}
-        <div className="hidden lg:block">
-          <div className="sticky top-[72px] space-y-3">
-            <DiagramCard
-              kind={note.diagram ?? "pipeline"}
-              caption={note.caption ?? note.summary}
-              metrics={note.metrics ?? []}
-              badge={note.category}
-            />
-            <div className="rounded-lg border border-border/70 bg-card px-3.5 py-3">
-              <div className="flex items-center justify-between">
-                <span className="label-xs text-muted-foreground/65">runtime</span>
-                <span className="num text-[10.5px] text-foreground/80">
-                  {note.runtime ?? "julia 1.10+"}
-                </span>
-              </div>
-              <Separator className="my-2.5" />
-              <div className="flex items-center justify-between">
-                <span className="label-xs text-muted-foreground/65">module</span>
-                <span className="num text-[10.5px] text-foreground/80">
-                  {mod?.index} · {mod?.title}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* -------------------------------------------------------- side rail */}
+        <aside className="hidden lg:block">
+          <TocRail
+            steps={note.steps ?? []}
+            runtime={note.runtime ?? "julia 1.10+"}
+            moduleLabel={`${mod?.index} · ${mod?.title}`}
+            tags={note.tags ?? []}
+          />
+        </aside>
       </div>
     </div>
   );

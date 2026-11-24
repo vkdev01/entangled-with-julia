@@ -1,0 +1,186 @@
+---
+title: "The Gate Zoo, Mapped"
+order: 2
+date: "2026-11-13"
+category: "quantum"
+tags: ["yao", "gates", "circuits", "linear-algebra"]
+summary: "Six gates, one matrix each, and every circuit is a product. Once you can print a gate as a matrix, quantum computing stops being a list of names to memorise."
+caption: "Gates compose left to right along the wire; the matrix product runs right to left."
+level: "beginner"
+runtime: "julia 1.10+ · Yao 0.8+"
+steps: ["Gates are matrices", "Compose a circuit", "Phase is real", "Universality"]
+diagram: "circuit"
+metrics:
+  - { label: "gates", value: "6", tint: "neutral" }
+  - { label: "unitary", value: "U†U = I", tint: "ok" }
+  - { label: "depth", value: "3", tint: "neutral" }
+---
+
+A quantum gate is a unitary matrix and nothing more. Everything mystical about them —
+superposition, interference, entanglement — is a consequence of multiplying by
+something that preserves length.
+
+So the fastest way to learn the zoo is to print each animal as a matrix and check it
+is unitary. Nine lines, no philosophy.
+
+<KeyIdea>
+Every gate preserves the norm: $U^\dagger U = I$. That single constraint is why
+quantum circuits are reversible and why measurement — which is not unitary — is the
+only irreversible thing in the model.
+</KeyIdea>
+
+## Gates are matrices
+
+`mat` turns any Yao block into the matrix that acts on the state vector. For one qubit
+that is 2×2.
+
+```julia title="quantum/gates.jl"
+using Yao, LinearAlgebra
+
+println(mat(X))      # bit flip
+println(mat(Z))      # phase flip
+println(round.(real.(mat(H)); digits = 4))   # Hadamard: real, symmetric
+```
+
+```text title="expected output"
+2×2 Matrix{ComplexF64}:
+ 0.0+0.0im  1.0+0.0im
+ 1.0+0.0im  0.0+0.0im
+2×2 Matrix{ComplexF64}:
+ 1.0+0.0im   0.0+0.0im
+ 0.0+0.0im  -1.0+0.0im
+2×2 Matrix{Float64}:
+  0.7071   0.7071
+  0.7071  -0.7071
+```
+
+And the check that makes them gates rather than arbitrary matrices:
+
+```julia title="quantum/gates.jl"
+for (name, g) in [("X", X), ("Y", Y), ("Z", Z), ("H", H), ("S", S), ("T", T)]
+    U = mat(g)
+    println(name, "  unitary: ", isapprox(U' * U, Matrix{ComplexF64}(I, 2, 2); atol = 1e-12))
+end
+```
+
+```text title="expected output"
+X  unitary: true
+Y  unitary: true
+Z  unitary: true
+H  unitary: true
+S  unitary: true
+T  unitary: true
+```
+
+Six gates, one property. `S` is a quarter turn of phase, `T` an eighth — which is why
+`T` is the expensive one in fault-tolerant hardware.
+
+## Compose a circuit
+
+`chain(n, ...)` reads left to right, the way you draw it. The matrix product runs the
+other way, so `chain(2, A, B)` is `mat(B) * mat(A)` — same circuit, reversed algebra.
+
+```julia title="quantum/gates.jl"
+circuit = chain(2, put(1 => H), control(1, 2 => X))   # Bell circuit
+U = mat(circuit)
+
+println(size(U))                 # (4, 4) — 2 qubits
+println(round.(abs.(statevec(zero_state(2) |> circuit)); digits = 3))
+```
+
+```text title="expected output"
+(4, 4)
+[0.707, 0.0, 0.0, 0.707]
+```
+
+Order matters, and the compiler will not warn you:
+
+```julia title="quantum/gates.jl"
+a = zero_state(1) |> chain(1, put(1 => H), put(1 => Z))
+b = zero_state(1) |> chain(1, put(1 => Z), put(1 => H))
+
+println(round.(real.(statevec(a)); digits = 3))   # [0.707, -0.707]
+println(round.(real.(statevec(b)); digits = 3))   # [0.707, 0.707]
+```
+
+```text title="expected output"
+[0.707, -0.707]
+[0.707, 0.707]
+```
+
+## Phase is real
+
+Global phase is invisible; *relative* phase is the entire content of quantum
+computation. Two states can have identical measurement statistics and still behave
+completely differently when you interfere them.
+
+```julia title="quantum/gates.jl"
+plus  = zero_state(1) |> put(1 => H)              # |+⟩
+minus = zero_state(1) |> chain(1, put(1 => H), put(1 => Z))   # |−⟩
+
+println("plus:  ", round.(real.(statevec(plus)); digits = 3))
+println("minus: ", round.(real.(statevec(minus)); digits = 3))
+println("probabilities identical: ",
+        round.(abs2.(statevec(plus)); digits = 3) ==
+        round.(abs2.(statevec(minus)); digits = 3))
+```
+
+```text title="expected output"
+plus:  [0.707, 0.707]
+minus: [0.707, -0.707]
+probabilities identical: true
+```
+
+Measure either one and you get 0 or 1 with equal probability. Apply `H` again and the
+difference is total: `|+⟩` returns to `|0⟩`, while `|−⟩` returns to `|1⟩`. That is
+interference, and it is the mechanism behind every quantum algorithm worth the name.
+
+```julia title="quantum/gates.jl"
+println(round.(abs2.(statevec(plus  |> put(1 => H))); digits = 3))   # [1.0, 0.0]
+println(round.(abs2.(statevec(minus |> put(1 => H))); digits = 3))   # [0.0, 1.0]
+```
+
+```text title="expected output"
+[1.0, 0.0]
+[0.0, 1.0]
+```
+
+## Universality
+
+`Rx`, `Ry`, `Rz` are the continuous knobs; `H`, `S`, `T`, `CNOT` are the discrete
+skeleton. Rotations reproduce the Paulis up to a global phase, which is the reason a
+gate set can be universal while looking nothing like the matrices you memorised.
+
+```julia title="quantum/gates.jl"
+println(isapprox(mat(Rx(π)), -im * mat(X); atol = 1e-12))   # true — same gate, phase aside
+println(isapprox(mat(Rz(π)), -im * mat(Z); atol = 1e-12))   # true
+```
+
+```text title="expected output"
+true
+true
+```
+
+`H` plus `T` plus `CNOT` is universal: any unitary on any number of qubits can be
+approximated to arbitrary accuracy with enough of those three. Which is a
+disappointing answer to "what makes a quantum computer", and also the true one.
+
+<Gotchas>
+
+- **`chain(2, A, B)` is `B·A`, not `A·B`.** Read the circuit left to right, the matrix
+  right to left. Getting this backwards produces a valid circuit that solves a
+  different problem.
+- **`put(1 => H)` needs the `=>`.** `put(1, H)` also works in some versions but the
+  pair syntax is the documented one and reads better in long chains.
+- **Global phase is unobservable, so `isapprox` on state vectors needs care.** Compare
+  `abs2` when you mean probabilities, and only compare raw amplitudes when you are
+  deliberately testing phase.
+- **`mat(g)` on a multi-qubit block is exponential.** A 20-qubit circuit is a
+  million-by-million matrix — print `size` before you print the contents.
+- **`S` and `T` are not interchangeable.** `T` is `√S`; using one where the other is
+  meant gives a correct-looking circuit with the wrong phase and a wrong answer after
+  interference.
+- **Unitarity is a test, not a guarantee of correctness.** Any `H`/`Z` combination is
+  unitary; only the right one computes what you meant.
+
+</Gotchas>

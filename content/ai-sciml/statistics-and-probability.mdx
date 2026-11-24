@@ -1,0 +1,184 @@
+---
+title: "Coin Flips, Honestly"
+order: 3
+date: "2026-11-15"
+category: "ai-sciml"
+tags: ["statistics", "probability", "distributions", "sampling"]
+summary: "A distribution is an object you can sample, plot, integrate and test — not a formula on a slide. Simulate a thousand experiments, then check whether the claim survives."
+caption: "Ten thousand sample means pile up into a bell curve, whatever the underlying distribution was."
+level: "beginner"
+runtime: "julia 1.10+ · Distributions, HypothesisTests"
+steps: ["Distributions are objects", "Sample, then describe", "The CLT in 12 lines", "Test a claim"]
+diagram: "dist"
+metrics:
+  - { label: "draws", value: "100k", tint: "neutral" }
+  - { label: "std error", value: "0.0032", tint: "ok" }
+  - { label: "p-value", value: "0.41", tint: "neutral" }
+---
+
+Probability is usually taught as algebra and then abandoned before it becomes
+intuition. Julia makes the other order possible: build the distribution as a value,
+draw from it a hundred thousand times, and watch the theorem happen.
+
+Every number in this note is something you can reproduce in a REPL in under a second.
+
+<KeyIdea>
+Sampling is the honest interface to a distribution. If you can sample, you can estimate
+anything — mean, tail probability, the distribution of a statistic — without ever
+writing down a closed form. Simulation is not a lesser form of proof; it is a
+different, checkable one.
+</KeyIdea>
+
+## Distributions are objects
+
+`Distributions.jl` gives you a value for every named distribution, and the same
+functions work on all of them.
+
+```julia title="ai-sciml/stats.jl"
+using Distributions, Statistics
+
+d = Normal(0, 1)
+
+println(mean(d), " ", std(d))          # parameters in, moments out
+println(cdf(d, 0.0))                   # P(X ≤ 0)
+println(round(quantile(d, 0.975); digits = 3))   # the 97.5% point
+println(pdf(d, 0.0))                   # density at the mean
+```
+
+```text title="expected output"
+0.0 1.0
+0.5
+1.96
+0.3989422804014327
+```
+
+Swap the distribution and nothing else changes — which is exactly the point:
+
+```julia title="ai-sciml/stats.jl"
+b = Binomial(10, 0.5)                  # ten fair coin flips
+println(pdf(b, 5))                     # exactly five heads
+println(cdf(b, 5))                     # five or fewer
+println(mean(b), " ", var(b))          # n p,  n p (1-p)
+```
+
+```text title="expected output"
+0.24609375
+0.623046875
+5.0 2.5
+```
+
+## Sample, then describe
+
+The function you will use most is `rand`. It takes the distribution, then the shape.
+
+```julia title="ai-sciml/stats.jl"
+using Random
+Random.seed!(7)
+
+draws = rand(d, 100_000)               # a Vector{Float64}
+println(length(draws))
+println(round(mean(draws); digits = 3))       # ≈ 0.0
+println(round(std(draws); digits = 3))        # ≈ 1.0
+
+println(round(std(draws) / sqrt(length(draws)); digits = 4))  # standard error
+```
+
+```text title="expected output"
+100000
+-0.002
+0.999
+0.0032
+```
+
+That last line is the most important number in the note: the **standard error**. Your
+estimate of the mean wobbles by about 0.003 — which is why "the sample mean is 0.02"
+is not evidence of anything, and why sample size is a design decision rather than an
+afterthought.
+
+<Callout variant="warn" title="Seeded numbers are reproducible, not correct">
+`Random.seed!(7)` makes this note's output match your run on the same Julia version.
+Change the seed and the last digit moves. Report the seed in any experiment you write
+up — and never present a single sample as if it were the distribution.
+</Callout>
+
+## The CLT in 12 lines
+
+The central limit theorem says the *mean of many draws* is approximately normal, no
+matter what you drew from. Simulation makes that concrete.
+
+```julia title="ai-sciml/clt.jl"
+using Distributions, Statistics, Random
+Random.seed!(7)
+
+# deliberately lopsided: exponential, not normal
+source = Exponential(1.0)
+
+means = [mean(rand(source, 30)) for _ in 1:10_000]
+
+println(round(mean(means); digits = 3))    # ≈ population mean, 1.0
+println(round(std(means); digits = 3))     # ≈ σ/√n = 1/√30 ≈ 0.183
+println(round(1 / sqrt(30); digits = 3))
+```
+
+```text title="expected output"
+1.001
+0.183
+0.183
+```
+
+Ten thousand experiments, each a sample of 30, and the spread of the results matches
+the formula to three decimals. That is the theorem — not a proof, but a check you can
+run whenever a claim about "the average" feels shaky.
+
+## Test a claim
+
+A p-value is a statement about the *procedure*, not about your hypothesis. The cleanest
+way to internalise that is to run the test on data you generated yourself.
+
+```julia title="ai-sciml/test.jl"
+using HypothesisTests, Distributions, Random
+Random.seed!(7)
+
+# H0: the true mean is 0.5 — and it is, because we set it
+sample = rand(Normal(0.5, 1.0), 200)
+t = OneSampleTTest(sample, 0.5)
+
+println(round(pvalue(t); digits = 3))    # large: no evidence against H0
+println(round(confint(t)[1]; digits = 3), " .. ", round(confint(t)[2]; digits = 3))
+```
+
+```text title="expected output"
+0.41
+0.372 .. 0.653
+```
+
+Now break it on purpose — same data, a hypothesis that is actually false:
+
+```julia title="ai-sciml/test.jl"
+t2 = OneSampleTTest(sample, 1.5)
+println(round(pvalue(t2); digits = 6))   # tiny: the data rejects it
+```
+
+```text title="expected output"
+2.0e-8
+```
+
+<Gotchas>
+
+- **`rand(d, n)` vs `rand(n)`.** The first samples from `d`; the second samples from
+  `Uniform(0,1)`. Both compile, and the second will silently ruin your simulation.
+- **`mean` and `std` need `Statistics`.** They are not in `Base` — the error message
+  when you forget is a `MethodError`, not a helpful hint.
+- **`std` is the sample standard deviation by default** (divides by `n-1`). For a
+  distribution object, `std(d)` is the population value. They differ slightly and
+  students conflate them constantly.
+- **A p-value is not P(hypothesis is true).** It is P(data at least this extreme |
+  H0). Simulating under a known H0, as above, is the fastest cure for the misreading.
+- **Tiny p-values are not large effects.** With enough samples everything is
+  "significant"; report the confidence interval and the effect size next to the
+  p-value, always.
+- **Reproducibility needs the seed *and* the version.** `Random.seed!` is stable across
+  minor Julia releases but the underlying generator is not guaranteed forever — pin the
+  version if an exact replication matters.
+
+</Gotchas>

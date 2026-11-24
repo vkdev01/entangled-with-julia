@@ -388,6 +388,9 @@ export const DIAGRAMS = {
   network: NetworkDiagram,
   circuit: CircuitDiagram,
   benchmark: BenchmarkDiagram,
+  lattice: LatticeDiagram,
+  curve: CurveDiagram,
+  dist: DistDiagram,
 } as const;
 
 export type DiagramKind = keyof typeof DIAGRAMS;
@@ -395,4 +398,234 @@ export type DiagramKind = keyof typeof DIAGRAMS;
 export function Diagram({ kind, className }: { kind: DiagramKind; className?: string }) {
   const Comp = DIAGRAMS[kind] ?? PipelineDiagram;
   return <Comp className={className} />;
+}
+
+/* ------------------------------------------------------------------ */
+/* 5. type lattice                                                     */
+/* ------------------------------------------------------------------ */
+export function LatticeDiagram({ className, animate }: DiagramProps) {
+  const reduced = useReducedMotion();
+  const on = animate !== false && !reduced;
+
+  type N = { x: number; y: number; label: string; active?: boolean };
+  const nodes: N[] = [
+    { x: 280, y: 34, label: "Any" },
+    { x: 280, y: 96, label: "Number", active: true },
+    { x: 170, y: 158, label: "Real", active: true },
+    { x: 390, y: 158, label: "Integer" },
+    { x: 170, y: 220, label: "AbstractFloat", active: true },
+    { x: 390, y: 220, label: "Int64" },
+  ];
+  const edges: [number, number][] = [
+    [0, 1],
+    [1, 2],
+    [1, 3],
+    [2, 4],
+    [3, 5],
+  ];
+  const W = 124;
+  const H = 30;
+
+  return (
+    <svg viewBox="0 0 560 290" className={cn("h-full w-full", className)} role="img" aria-label="Julia's type lattice: concrete types sit under abstract types, and dispatch picks the most specific method">
+      <text x="12" y="24" style={{ ...mono, fontSize: 9, letterSpacing: "0.18em" }} className="fill-muted-foreground">
+        TYPE LATTICE
+      </text>
+      <text x="548" y="24" textAnchor="end" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        most specific wins
+      </text>
+
+      {edges.map(([a, b]) => (
+        <line
+          key={`${a}-${b}`}
+          x1={nodes[a].x}
+          y1={nodes[a].y + H / 2}
+          x2={nodes[b].x}
+          y2={nodes[b].y - H / 2}
+          className={nodes[a].active && nodes[b].active ? "stroke-primary/45" : "stroke-border/70"}
+          strokeWidth="1"
+          strokeDasharray={nodes[a].active && nodes[b].active ? undefined : "3 3"}
+        />
+      ))}
+
+      {nodes.map((n) => (
+        <g key={n.label}>
+          <rect
+            x={n.x - W / 2}
+            y={n.y - H / 2}
+            width={W}
+            height={H}
+            rx={8}
+            className={n.active ? "fill-primary/[0.08] stroke-primary/50" : "fill-muted/30 stroke-border/80"}
+            strokeWidth="1"
+          />
+          <text x={n.x} y={n.y + 4} textAnchor="middle" style={{ ...mono, fontSize: 11 }} className={n.active ? "fill-foreground" : "fill-muted-foreground"}>
+            {n.label}
+          </text>
+        </g>
+      ))}
+
+      <text x="12" y="278" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        dispatch walks down to the leaf, then stops
+      </text>
+
+      <SignalDot path="M 280 49 L 280 81 L 170 143 L 170 205" animate={on} dur={5} />
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 6. ODE solution curve                                               */
+/* ------------------------------------------------------------------ */
+export function CurveDiagram({ className, animate }: DiagramProps) {
+  const reduced = useReducedMotion();
+  const on = animate !== false && !reduced;
+
+  // u(t) = e^{0.5t}, plotted in a 420x200 box
+  const pts: string[] = [];
+  for (let i = 0; i <= 40; i++) {
+    const t = (i / 40) * 4;
+    const u = Math.exp(0.5 * t);
+    const x = 90 + (t / 4) * 400;
+    const y = 240 - ((u - 1) / (Math.exp(2) - 1)) * 170;
+    pts.push(`${x.toFixed(1)} ${y.toFixed(1)}`);
+  }
+  const curve = `M ${pts.join(" L ")}`;
+
+  return (
+    <svg viewBox="0 0 560 300" className={cn("h-full w-full", className)} role="img" aria-label="Solution curve of du/dt = 0.5u rising exponentially, with time steps marked by the solver">
+      <text x="12" y="34" style={{ ...mono, fontSize: 9, letterSpacing: "0.18em" }} className="fill-muted-foreground">
+        du/dt = 0.5u · u(0) = 1
+      </text>
+      <text x="548" y="34" textAnchor="end" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        Tsit5
+      </text>
+
+      {/* axes */}
+      <line x1="90" y1="60" x2="90" y2="240" className="stroke-border" strokeWidth="1" />
+      <line x1="90" y1="240" x2="510" y2="240" className="stroke-border" strokeWidth="1" />
+      <text x="82" y="66" textAnchor="end" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        u
+      </text>
+      <text x="514" y="244" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        t
+      </text>
+
+      {/* gridlines */}
+      {[0.25, 0.5, 0.75].map((f) => (
+        <line key={f} x1={90} y1={240 - f * 170} x2="510" y2={240 - f * 170} className="stroke-border/40" strokeWidth="1" strokeDasharray="2 4" />
+      ))}
+
+      <path d={curve} className="fill-none stroke-primary/60" strokeWidth="1.6" />
+
+      {/* solver steps */}
+      {[0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map((t) => {
+        const u = Math.exp(0.5 * t);
+        const x = 90 + (t / 4) * 400;
+        const y = 240 - ((u - 1) / (Math.exp(2) - 1)) * 170;
+        return <circle key={t} cx={x} cy={y} r="2.6" className="fill-card stroke-primary/70" strokeWidth="1" />;
+      })}
+
+      <text x="96" y="232" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        1
+      </text>
+      <text x="494" y="232" textAnchor="end" style={{ ...mono, fontSize: 9 }} className="fill-ok">
+        e² ≈ 7.39
+      </text>
+      <text x="12" y="282" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        adaptive steps · error controlled per step
+      </text>
+
+      <SignalDot path={curve} animate={on} dur={6} />
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 7. sampling distribution                                            */
+/* ------------------------------------------------------------------ */
+export function DistDiagram({ className, animate }: DiagramProps) {
+  const reduced = useReducedMotion();
+  const on = animate !== false && !reduced;
+
+  const bars = 26;
+  const xs = Array.from({ length: bars }, (_, i) => i);
+  const heights = xs.map((i) => {
+    const z = (i - (bars - 1) / 2) / 3.4;
+    return Math.exp(-0.5 * z * z);
+  });
+  const max = Math.max(...heights);
+  const baseY = 232;
+  const barW = 14;
+  const gap = 2;
+  const x0 = 84;
+
+  return (
+    <svg viewBox="0 0 560 300" className={cn("h-full w-full", className)} role="img" aria-label="A histogram of samples from a normal distribution with the density curve overlaid">
+      <text x="12" y="34" style={{ ...mono, fontSize: 9, letterSpacing: "0.18em" }} className="fill-muted-foreground">
+        N(μ, σ²) · 10⁵ SAMPLES
+      </text>
+      <text x="548" y="34" textAnchor="end" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        Distributions.jl
+      </text>
+
+      <line x1="70" y1={baseY} x2="520" y2={baseY} className="stroke-border" strokeWidth="1" />
+
+      {xs.map((i) => {
+        const h = (heights[i] / max) * 150;
+        const x = x0 + i * (barW + gap);
+        const inside = Math.abs(i - (bars - 1) / 2) < 2.2;
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={baseY - h}
+            width={barW}
+            height={h}
+            rx={2}
+            className={inside ? "fill-primary/35 stroke-primary/40" : "fill-muted/50 stroke-border/60"}
+            strokeWidth="0.8"
+          />
+        );
+      })}
+
+      {/* density outline */}
+      <path
+        d={
+          "M " +
+          xs
+            .map((i) => {
+              const h = (heights[i] / max) * 150;
+              const x = x0 + i * (barW + gap) + barW / 2;
+              return `${x} ${baseY - h - 4}`;
+            })
+            .join(" L ")
+        }
+        className="fill-none stroke-primary/50"
+        strokeWidth="1.2"
+      />
+
+      {/* mean marker */}
+      <line x1={x0 + (bars / 2) * (barW + gap)} y1={baseY - 158} x2={x0 + (bars / 2) * (barW + gap)} y2={baseY} className="stroke-signal/40" strokeWidth="1" strokeDasharray="3 3" />
+      <text x={x0 + (bars / 2) * (barW + gap) + 6} y={baseY - 150} style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        μ
+      </text>
+
+      <text x="70" y="262" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        σ = 1.0
+      </text>
+      <text x="520" y="262" textAnchor="end" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/70">
+        n = 100 000
+      </text>
+      <text x="12" y="284" style={{ ...mono, fontSize: 9 }} className="fill-muted-foreground/50">
+        sample, then describe — never the other way round
+      </text>
+
+      <SignalDot
+        path={`M ${x0 + 2 * (barW + gap)} ${baseY - (heights[2] / max) * 150 - 6} Q ${x0 + (bars / 2) * (barW + gap)} ${baseY - 168} ${x0 + (bars - 3) * (barW + gap)} ${baseY - (heights[bars - 3] / max) * 150 - 6}`}
+        animate={on}
+        dur={5.5}
+      />
+    </svg>
+  );
 }

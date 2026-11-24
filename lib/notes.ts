@@ -8,7 +8,7 @@ export const MODULES = [
     title: "Julia Basics",
     index: "01",
     blurb:
-      "Indexing from one, multiple dispatch, the type lattice. The parts that make Julia feel strange for a week and obvious forever after.",
+      "Indexing from one, the type lattice, multiple dispatch, and an environment you can actually reproduce.",
     accent: "primary" as const,
   },
   {
@@ -16,7 +16,7 @@ export const MODULES = [
     title: "AI & SciML",
     index: "02",
     blurb:
-      "Neural networks in Flux, differential equations, probability and statistics — the numerical stack Julia was built for.",
+      "Neural networks in Flux, differential equations that solve themselves, and statistics you can simulate instead of memorise.",
     accent: "primary" as const,
   },
   {
@@ -24,7 +24,7 @@ export const MODULES = [
     title: "Quantum",
     index: "03",
     blurb:
-      "Circuits, states and measurement with Yao.jl. Entanglement you can print to the terminal.",
+      "Circuits, gates and measurement with Yao.jl. Entanglement you can print to the terminal in nine lines.",
     accent: "primary" as const,
   },
   {
@@ -32,7 +32,7 @@ export const MODULES = [
     title: "Experiments",
     index: "04",
     blurb:
-      "Benchmarks, micro-benchmarks and honest measurements. Where the speed claims meet a stopwatch.",
+      "Benchmarks, type stability and honest measurements. Where the speed claims meet a stopwatch.",
     accent: "primary" as const,
   },
 ] as const;
@@ -52,9 +52,17 @@ export type NoteFrontmatter = {
   caption?: string;
   steps?: string[];
   metrics?: Metric[];
-  diagram?: "pipeline" | "network" | "circuit" | "benchmark";
+  diagram?:
+    | "pipeline"
+    | "network"
+    | "circuit"
+    | "benchmark"
+    | "lattice"
+    | "curve"
+    | "dist";
   level?: string;
   runtime?: string;
+  order?: number;
 };
 
 export type Note = NoteFrontmatter & {
@@ -76,14 +84,22 @@ function readModule(moduleSlug: ModuleSlug): Note[] {
   if (!fs.existsSync(dir)) return [];
   const mod = MODULES.find((m) => m.slug === moduleSlug)!;
 
-  return fs
+  const files = fs
     .readdirSync(dir)
-    .filter((f) => f.endsWith(".mdx"))
-    .sort()
-    .map((file, i) => {
+    .filter((f) => f.endsWith(".mdx"));
+
+  const parsed = files.map((file) => {
       const raw = fs.readFileSync(path.join(dir, file), "utf8");
       const { data, content } = matter(raw);
-      const fm = data as NoteFrontmatter;
+      return { file, fm: data as NoteFrontmatter, content };
+  });
+
+  parsed.sort(
+    (a, b) => (a.fm.order ?? 999) - (b.fm.order ?? 999) || a.file.localeCompare(b.file),
+  );
+
+  return parsed
+    .map(({ file, fm, content }, i) => {
       const words = content.split(/\s+/).filter(Boolean).length;
       const codeCells = (content.match(/^```julia/gm) ?? []).length;
       const slug = file.replace(/\.mdx$/, "");

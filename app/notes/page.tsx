@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { ArrowRight, ArrowUpRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { getNotesByModule, getStats } from "@/lib/notes";
-import { formatDate, pad } from "@/lib/utils";
+import { formatDate, pad, plural } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "All notes",
@@ -25,13 +25,13 @@ export default function NotesIndexPage() {
         All notes
       </h1>
       <p className="mt-3 max-w-[62ch] text-prose text-foreground/70">
-        {stats.notes} notes across {stats.modules} modules — {stats.codeCells} runnable
+        {plural(stats.notes, "note")} across {plural(stats.modules, "module")} — {stats.codeCells} runnable
         Julia cells, every one with an expected output you can argue with.
       </p>
 
       <div className="mt-10 space-y-10">
         {modules.map(({ module, notes }) => (
-          <section key={module.slug}>
+          <section key={module.slug} id={module.slug}>
             <div className="flex items-baseline gap-3 border-b border-border/70 pb-2.5">
               <span className="num text-[10.5px] text-muted-foreground/70">
                 {module.index}
@@ -61,7 +61,7 @@ export default function NotesIndexPage() {
                       </h3>
                       <span className="num text-[10px] text-muted-foreground/55">
                         {formatDate(note.date)} · {note.readingMinutes} min ·{" "}
-                        {note.codeCells} cells
+                        {plural(note.codeCells, "cell")}
                       </span>
                     </div>
                     <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">

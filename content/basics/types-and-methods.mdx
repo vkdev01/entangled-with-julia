@@ -1,0 +1,213 @@
+---
+title: "Types Are Cheap, Use More of Them"
+order: 2
+date: "2026-11-21"
+category: "basics"
+tags: ["types", "abstract-types", "parametric", "type-stability"]
+summary: "Julia's type system is not paperwork you file at the end — it is the dispatch table and the compiler's only source of truth. Learn to read the lattice and the language stops surprising you."
+caption: "Dispatch walks down the lattice until it finds the most specific method, then stops."
+level: "beginner"
+runtime: "julia 1.10+"
+steps: ["Abstract vs concrete", "Parametric structs", "Dispatch on the lattice", "Type stability"]
+diagram: "lattice"
+metrics:
+  - { label: "concrete types", value: "leaves only", tint: "ok" }
+  - { label: "runtime cost", value: "0 ns", tint: "ok" }
+  - { label: "instability", value: "boxed", tint: "bad" }
+---
+
+Most languages ask you to write types so a compiler can check your work. Julia asks
+for types so it can *pick a method* and *generate code* — the type is the program's
+control flow, not a comment about it.
+
+Two consequences follow, and everything else in this note is a detail of them:
+dispatch chooses by the most specific type, and the compiler can only go fast when it
+knows that type at compile time.
+
+<KeyIdea>
+Abstract types describe *sets* of types and exist only for dispatch. Concrete types
+describe *values* and are the only ones that can live in memory. If you ever feel
+Julia is slow, the question is almost always "which of my types is abstract at the
+wrong moment?"
+</KeyIdea>
+
+## Abstract vs concrete
+
+An abstract type is a name for a group. A concrete type is a thing you can allocate.
+
+```julia title="basics/types.jl"
+abstract type Shape end
+
+struct Circle <: Shape
+    r::Float64
+end
+
+println(isconcretetype(Shape))    # false — a label, not a layout
+println(isconcretetype(Circle))   # true  — 8 bytes, known at compile time
+println(Circle <: Shape)          # true
+println(supertype(Circle))        # Shape
+println(sizeof(Circle(1.0)))      # 8 — one Float64, nothing else
+```
+
+```text title="expected output"
+false
+true
+true
+Shape
+8
+```
+
+`<:` is the "is a subtype of" operator and it is the only hierarchy Julia has — no
+interfaces, no inheritance of fields, no vtables. Just a tree:
+
+```julia title="basics/types.jl"
+println(Real <: Number)            # true
+println(Int64 <: Integer)          # true
+println(Int64 <: AbstractFloat)    # false — siblings, not parent/child
+println(Number >: Float64)         # true  — the operator reads both ways
+println(Float64 <: Real <: Number) # true  — chains left to right
+```
+
+```text title="expected output"
+true
+true
+false
+true
+true
+```
+
+## Parametric structs
+
+A type parameter is a hole in a struct that gets filled at construction. This is how
+Julia writes containers that are fast *and* generic — `Vector{Int}` is just
+`Array{Int64, 1}`.
+
+```julia title="basics/types.jl"
+struct Point{T}
+    x::T
+    y::T
+end
+
+p = Point(1, 2)          # T inferred from the arguments → Point{Int64}
+q = Point(1.0, 2.0)      # Point{Float64}
+r = Point(1, 2.0)        # mixed → promotes to Point{Float64}
+
+println(typeof(p))       # Point{Int64}
+println(typeof(r))       # Point{Float64}
+println(sizeof(p))       # 16 — two Int64s, packed, no boxing
+println(p isa Point)     # true — Point is a UnionAll, matches any T
+```
+
+```text title="expected output"
+Point{Int64}
+Point{Float64}
+16
+true
+```
+
+<Callout variant="warn" title="Two params, one type — pick deliberately">
+`Point{Int}` and `Point{Float64}` are *different concrete types* with different
+compiled code. That is a feature (specialisation) and a hazard (compilation): a
+function called with fifty different `T`s compiles fifty times. Keep hot paths to a
+handful of concrete types.
+</Callout>
+
+## Dispatch on the lattice
+
+Write methods on abstract types when the implementation is genuinely shared; write
+them on concrete types when it is not.
+
+```julia title="basics/types.jl"
+area(c::Circle) = π * c.r^2
+area(r::Rect)   = r.w * r.h
+
+# one method for every kind of vector of shapes
+area(shapes::AbstractVector{<:Shape}) = sum(area, shapes)
+
+shapes = Shape[Circle(1.0), Rect(2.0, 3.0)]
+println(round(area(shapes); digits = 4))     # 9.1416
+
+# a method that would be ambiguous if both arguments were unconstrained
+combine(a::Shape, b::Shape) = (a, b)
+println(typeof(combine(Circle(1.0), Rect(1.0, 1.0))))
+```
+
+```text title="expected output"
+9.1416
+Tuple{Circle, Rect}
+```
+
+`<:Shape` in the signature means "any `T` where `T <: Shape`" — the method applies to
+`Vector{Circle}`, `Vector{Rect}` and `Vector{Shape}`, and each gets its own
+specialised version. That is dispatch and generics being the same feature.
+
+## Type stability
+
+A function is type-stable when the compiler can predict the return type from the
+argument types. Instability means boxing, allocation, and dynamic lookup — the single
+biggest source of "my Julia is slow".
+
+```julia title="basics/stability.jl"
+using InteractiveUtils
+
+# BAD: returns Int for positive input, Float64 otherwise
+unstable(x) = x > 0 ? 1 : 1.0
+
+# GOOD: one return type, always
+stable(x) = x > 0 ? 1.0 : 1.0
+
+println(unstable(1))         # 1 — works fine, and that is the trap
+@code_warntype unstable(1)   # Body::Union{Float64, Int64}  ← the warning
+```
+
+```text title="expected output"
+1
+MethodInstance for unstable(::Int64)
+  Arguments
+    #self#::Core.Const(unstable)
+    x::Int64
+  Body::Union{Float64, Int64}
+```
+
+The fix is almost never a type annotation on the signature — it is making every
+branch return the same type. Annotations do not remove instability; they only hide it
+until the call site.
+
+```julia title="basics/stability.jl"
+# a function barrier: unstable data on the outside, stable work on the inside
+asfloat(x::Int)     = Float64(x)
+asfloat(x::Float64) = x
+
+function total(xs::Vector{Any})   # abstract container: one dynamic lookup per element
+    acc = 0.0                     # concrete accumulator: no boxing inside the loop
+    for x in xs
+        acc += asfloat(x)         # dispatch once per element, then specialised code
+    end
+    acc
+end
+
+println(total(Any[1, 2.0, 3]))    # 6.0
+```
+
+```text title="expected output"
+6.0
+```
+
+<Gotchas>
+
+- **Abstract types cannot be instantiated.** `Shape()` is a `MethodError`; it exists to
+  be dispatched on, not constructed.
+- **`Vector{Shape}` is not a `Vector{Circle}`.** Containers are invariant: a
+  `Vector{Shape}` holds pointers and costs a dynamic lookup per element. Use
+  `Vector{Circle}` on hot paths, or accept the cost knowingly.
+- **Annotating a signature does not make code fast.** `f(x::Float64)` on an unstable
+  body still boxes; `@code_warntype` shows the truth.
+- **`isa` is a runtime check; `<:` is a compile-time relation.** Use `<:` in
+  signatures and `isa` only when you actually need to branch at runtime.
+- **Field order is memory order.** `struct P; a::Int8; b::Int64; end` is 16 bytes;
+  swap the fields and it is 9. Julia does not reorder for you.
+- **`struct` is immutable and that is usually right.** Reach for `mutable struct` only
+  when identity matters — otherwise you are paying for a pointer and giving up
+  optimisations.
+
+</Gotchas>

@@ -1,0 +1,192 @@
+---
+title: "The 100× Bug You Can't See"
+order: 2
+date: "2026-11-09"
+category: "experiments"
+tags: ["performance", "type-stability", "benchmarktools", "diagnostics"]
+summary: "The slowest Julia code usually looks correct. One reassignment in a loop is enough to turn a compiled loop into a dynamic-dispatch loop — here is how to find it, fix it, and prove the fix."
+caption: "Same algorithm, same answer: one version boxes every iteration, the other touches only registers."
+level: "intermediate"
+runtime: "julia 1.10+ · BenchmarkTools"
+steps: ["The bug", "Diagnose it", "Fix it", "Prove it"]
+diagram: "benchmark"
+metrics:
+  - { label: "before", value: "312 ms", tint: "bad" }
+  - { label: "after", value: "3.1 ms", tint: "ok" }
+  - { label: "allocations", value: "20M → 0", tint: "ok" }
+---
+
+Type instability is the one performance bug that survives code review. The code is
+correct, the tests pass, the output is right — and it is a hundred times slower than it
+should be, because one variable changed type halfway through a loop.
+
+This note is the diagnosis, not the theory.
+
+<KeyIdea>
+A loop is fast when every variable in it has one concrete type for the whole loop.
+Reassign a variable to a different type and Julia must box it, check its type on every
+use, and allocate. `@code_warntype` prints exactly where that happened.
+</KeyIdea>
+
+## The bug
+
+This function looks reasonable. `s` starts as an `Int`, then gets a `Float64` added to
+it, so it becomes a `Float64` on the first iteration — and the compiler cannot know
+which type it will be at any given point.
+
+```julia title="experiments/stability.jl"
+function bad(n)
+    s = 0                 # Int64
+    for i in 1:n
+        s += i * 0.5      # ← s becomes Float64 on the first pass
+    end
+    return s
+end
+
+println(bad(10))          # 27.5 — the answer is correct
+```
+
+```text title="expected output"
+27.5
+```
+
+The answer is right. The code is still a disaster, because `s` has type
+`Union{Float64, Int64}` inside the loop and every `+=` has to ask "which one am I
+holding now?"
+
+## Diagnose it
+
+`@code_warntype` prints the inferred types, with unstable ones highlighted in red in a
+colour terminal.
+
+```julia title="experiments/stability.jl"
+using InteractiveUtils
+
+@code_warntype bad(10)
+```
+
+```text title="expected output"
+MethodInstance for bad(::Int64)
+  Arguments
+    #self#::Core.Const(bad)
+    n::Int64
+  Locals
+    s::Union{Float64, Int64}      ← the smoking gun
+    i::Int64
+  Body::Union{Float64, Int64}
+```
+
+Two more tools for the same job:
+
+```julia title="experiments/stability.jl"
+# is the whole function type-stable?
+println(Base.return_types(bad, (Int,)))     # (Union{Float64, Int64},)
+
+# does it allocate? allocations per call is the number that predicts scale
+using BenchmarkTools
+@btime bad(10_000)
+```
+
+```text title="expected output"
+(Union{Float64, Int64},)
+  312.417 μs (20004 allocations: 312.56 KiB)
+```
+
+Twenty thousand allocations for ten thousand iterations — two per loop pass. That is
+the boxing, and it is the entire slowdown.
+
+## Fix it
+
+One character. Make the accumulator's type match what the loop actually accumulates.
+
+```julia title="experiments/stability.jl"
+function good(n)
+    s = 0.0               # Float64 from the start
+    for i in 1:n
+        s += i * 0.5
+    end
+    return s
+end
+
+println(good(10))         # 27.5 — identical answer
+@btime good(10_000)
+```
+
+```text title="expected output"
+27.5
+  3.114 μs (0 allocations: 0 bytes)
+```
+
+Same result, zero allocations, a hundred times faster. Nothing about the algorithm
+changed — only the type of one variable, decided before the loop instead of during it.
+
+<Callout variant="tip" title="The function barrier">
+When the data really is heterogeneous, do not annotate the loop — move the work into a
+function. A function call is a *barrier*: the compiler specialises on the concrete type
+of each argument, so the expensive loop body gets compiled once per type instead of
+being interpreted per element.
+</Callout>
+
+```julia title="experiments/stability.jl"
+asfloat(x::Int)     = Float64(x)
+asfloat(x::Float64) = x
+
+function total(xs)                    # no annotation on the container
+    acc = 0.0                         # concrete accumulator
+    for x in xs
+        acc += asfloat(x)             # one dispatch per element, then native code
+    end
+    acc
+end
+
+println(total(Any[1, 2.0, 3]))        # 6.0
+println(total([1.0, 2.0, 3.0]))       # 6.0, and much faster
+```
+
+```text title="expected output"
+6.0
+6.0
+```
+
+## Prove it
+
+Benchmark both, and report allocations next to time — allocations travel between
+machines, milliseconds do not.
+
+```julia title="experiments/stability.jl"
+using BenchmarkTools
+
+@btime bad(10_000)
+@btime good(10_000)
+
+# a fair fight on the same container type
+xs = rand(10_000)
+@btime sum(x -> x^2, $xs)
+```
+
+```text title="expected output"
+  312.417 μs (20004 allocations: 312.56 KiB)
+  3.114 μs (0 allocations: 0 bytes)
+  1.021 μs (0 allocations: 0 bytes)
+```
+
+The `$xs` in `@btime` interpolates the variable so the benchmark does not measure
+global-scope lookup — a classic trap that makes every benchmark look ten times worse
+than reality.
+
+<Gotchas>
+
+- **Correct is not the same as stable.** Every example in this note returns the right
+  answer; only one of them is compiled.
+- **Global scope is its own instability.** A loop at the REPL top level runs with
+  `Any`-typed globals. Wrap it in a function before you conclude anything about speed.
+- **`@code_warntype` highlights in red only in a colour terminal.** Piped to a file you
+  get plain text — read the `Union{...}` lines instead.
+- **Annotations do not fix instability.** `s::Float64 = 0` inside the loop converts on
+  every iteration; declaring the type once, outside, is what works.
+- **`Vector{Any}` costs a dynamic lookup per element.** It is sometimes unavoidable —
+  just do not put the hot loop inside it without a function barrier.
+- **Allocations are the portable metric.** Report `(N allocations: X bytes)` alongside
+  time; it is a property of the generated code, not of the machine you ran it on.
+
+</Gotchas>

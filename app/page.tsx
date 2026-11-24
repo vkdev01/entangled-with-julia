@@ -4,13 +4,13 @@ import { PipelineDiagram } from "@/components/diagrams";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getNotesByModule, getStats } from "@/lib/notes";
-import { pad } from "@/lib/utils";
+import { pad, plural } from "@/lib/utils";
 
 const setupLines: { text: string; comment?: string }[] = [
   { text: "juliaup add release", comment: "install julia 1.10+" },
   { text: "git clone https://github.com/vkdev01/entangled-with-julia" },
   { text: "cd entangled-with-julia/julia" },
-  { text: "julia --project=. -e 'using Pkg; Pkg.instantiate()'", comment: "deps" },
+  { text: "julia --project=. setup.jl", comment: "deps" },
   { text: "julia --project=. basics/indexing_dispatch.jl" },
   { text: "npm install && npm run dev", comment: "this site" },
 ];
@@ -145,35 +145,55 @@ export default function HomePage() {
 
         <div className="mt-7 grid gap-3 sm:grid-cols-2">
           {modules.map(({ module, notes }) => (
-            <Link
+            <div
               key={module.slug}
-              href={notes[0]?.href ?? "/notes"}
-              className="group relative overflow-hidden rounded-lg border border-border/70 bg-card p-5 transition-colors duration-200 hover:border-primary/40 hover:bg-primary/[0.03]"
+              className="overflow-hidden rounded-lg border border-border/70 bg-card"
             >
-              <div className="flex items-start justify-between">
-                <span className="num text-[10.5px] text-muted-foreground/70">
-                  {module.index}
-                </span>
-                <span className="num text-[10.5px] text-muted-foreground/60">
-                  {notes.length} note{notes.length === 1 ? "" : "s"} ·{" "}
-                  {notes.reduce((n, x) => n + x.codeCells, 0)} cells
-                </span>
+              <div className="p-5">
+                <div className="flex items-start justify-between">
+                  <span className="num text-[10.5px] text-muted-foreground/60">
+                    {module.index}
+                  </span>
+                  <span className="num text-[10px] text-muted-foreground/50">
+                    {plural(notes.length, "note")}
+                  </span>
+                </div>
+                <h3 className="mt-2.5 text-[15px] font-semibold tracking-[-0.01em]">
+                  {module.title}
+                </h3>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
+                  {module.blurb}
+                </p>
               </div>
-              <h3 className="mt-3 text-[15px] font-semibold tracking-[-0.01em]">
-                {module.title}
-              </h3>
-              <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
-                {module.blurb}
-              </p>
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                {(notes[0]?.tags ?? []).slice(0, 4).map((t) => (
-                  <Badge key={t} variant="outline" className="num">
-                    {t}
-                  </Badge>
+              <ul className="divide-y divide-border/50 border-t border-border/60">
+                {notes.slice(0, 4).map((n) => (
+                  <li key={n.href}>
+                    <Link
+                      href={n.href}
+                      className="group flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-primary/[0.04]"
+                    >
+                      <span className="num w-4 shrink-0 text-[9.5px] text-muted-foreground/50">
+                        {pad(n.number)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground/80 group-hover:text-foreground">
+                        {n.title}
+                      </span>
+                      <ArrowRight className="size-3 shrink-0 text-muted-foreground/30 transition-all group-hover:translate-x-0.5 group-hover:text-primary" />
+                    </Link>
+                  </li>
                 ))}
-              </div>
-              <ArrowRight className="absolute bottom-5 right-5 size-4 -translate-x-1 text-primary opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100" />
-            </Link>
+                {notes.length > 4 && (
+                  <li className="px-5 py-2">
+                    <Link
+                      href={`/notes#${module.slug}`}
+                      className="num text-[10.5px] text-muted-foreground/60 transition-colors hover:text-primary"
+                    >
+                      +{notes.length - 4} more
+                    </Link>
+                  </li>
+                )}
+              </ul>
+            </div>
           ))}
         </div>
       </section>
