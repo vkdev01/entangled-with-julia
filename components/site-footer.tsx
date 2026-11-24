@@ -32,7 +32,7 @@ export function SiteFooter() {
             Julia docs
           </a>
           <a
-            href="https://github.com/vkdev01/julia-playground"
+            href="https://github.com/vkdev01/entangled-with-julia"
             target="_blank"
             rel="noreferrer noopener"
             className="transition-colors hover:text-foreground"

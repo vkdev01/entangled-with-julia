@@ -8,8 +8,8 @@ import { pad } from "@/lib/utils";
 
 const setupLines: { text: string; comment?: string }[] = [
   { text: "juliaup add release", comment: "install julia 1.10+" },
-  { text: "git clone https://github.com/vkdev01/julia-playground" },
-  { text: "cd julia-playground/julia" },
+  { text: "git clone https://github.com/vkdev01/entangled-with-julia" },
+  { text: "cd entangled-with-julia/julia" },
   { text: "julia --project=. -e 'using Pkg; Pkg.instantiate()'", comment: "deps" },
   { text: "julia --project=. basics/indexing_dispatch.jl" },
   { text: "npm install && npm run dev", comment: "this site" },

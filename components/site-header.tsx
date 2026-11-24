@@ -40,7 +40,7 @@ export function SiteHeader() {
 
           <div className="ml-auto flex items-center gap-1.5">
             <a
-              href="https://github.com/vkdev01/julia-playground"
+              href="https://github.com/vkdev01/entangled-with-julia"
               target="_blank"
               rel="noreferrer noopener"
               aria-label="Repository on GitHub"

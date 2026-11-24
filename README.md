@@ -1,7 +1,9 @@
-# julia/playground
+# entangled-with-julia
 
 > A runnable Julia lab — notes, tutorials and experiments — wrapped in a technical
-> reading UI built with Next.js, Tailwind and shadcn/ui.
+> reading UI built with Next.js, Tailwind and shadcn/ui. The site calls itself
+> **julia/playground**; the repo is the pun. The site calls itself
+> **julia/playground**; the repo is the pun.
 
 Every snippet in this repo is a real file you can run. Every code block in the notes
 has an expected output. Every expected output has a gotcha.
