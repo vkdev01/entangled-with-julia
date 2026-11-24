@@ -12,7 +12,9 @@ has an expected output. Every expected output has a gotcha.
 basics → dispatch → Flux → Yao → benchmarks
 ```
 
-**Live site:** https://vkdev01.github.io/entangled-with-julia/
+**Live site:** https://vkdev01.github.io/entangled-with-julia/ — served by
+`.github/workflows/pages.yml`. If that URL 404s, Pages has not been switched on yet:
+**Settings → Pages → Source: GitHub Actions**, then re-run the workflow once.
 
 ---
 
