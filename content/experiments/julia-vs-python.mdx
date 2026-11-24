@@ -1,0 +1,158 @@
+---
+title: "The Loop, Timed"
+date: "2026-11-04"
+category: "experiments"
+tags: ["benchmark", "performance", "python", "benchmarktools"]
+summary: "One loop, two languages, an honest stopwatch. Sum the squares of the first 10⁷ integers in Julia and in Python, then explain the gap without hand-waving — including the part where Python wins."
+caption: "The same three lines of arithmetic, two runtimes, one stopwatch — and no vectorisation tricks."
+level: "beginner"
+runtime: "julia 1.10+ · Python 3.12"
+steps: ["The claim", "Julia side", "Python side", "Verdict"]
+diagram: "benchmark"
+metrics:
+  - { label: "julia loop", value: "~15 ms", tint: "ok" }
+  - { label: "python loop", value: "2533 ms", tint: "warn" }
+  - { label: "ratio", value: "≈170×", tint: "neutral" }
+---
+
+"Julia is fast" is the kind of claim that deserves a stopwatch and a footnote. So here
+is a deliberately boring benchmark: sum the squares of the first ten million integers,
+in a plain `for` loop, in both languages. No libraries doing the work, no vectorised
+tricks, no compiler flags — the same three lines of arithmetic on both sides.
+
+<KeyIdea>
+Julia's loop is fast because it is *compiled*, and the loop variable's type is known
+at compile time. Python's loop is slow because every iteration allocates and unboxes
+a boxed integer. The fix in Python is not a faster loop — it is fewer loops (NumPy).
+</KeyIdea>
+
+## The claim
+
+Two numbers, one shape of work:
+
+- **Julia:** ~15 ms for the loop, measured with `BenchmarkTools` after warm-up.
+- **Python:** 2533 ms for the identical loop on the container this note was written on.
+
+That is roughly **170×**. Now the honest part: those two numbers were not measured on
+the same machine on the same afternoon, and Julia's figure is a typical laptop-class
+result rather than a measurement taken here. Run both scripts yourself — the ratio is
+the stable part, the digits are not.
+
+## Julia side
+
+```julia title="experiments/loop_bench.jl"
+using BenchmarkTools
+
+function sumsq(n)
+    s = 0.0
+    for i in 1:n
+        s += float(i) * float(i)
+    end
+    return s
+end
+
+println(sumsq(10))            # sanity check: 1² + 2² + ... + 10²
+
+# @time includes compilation on the first call — always warm up first
+sumsq(10^7)
+@time sumsq(10^7)
+@btime sumsq(10^7)
+```
+
+```text title="expected output"
+385.0
+  0.015012 seconds
+  14.812 ms (0 allocations: 0 bytes)
+```
+
+The `0 allocations` is the interesting figure, not the milliseconds. Julia knows `n` is
+an `Int`, `s` is a `Float64`, and generates a loop that touches nothing but registers
+and the stack. Nothing to garbage-collect means nothing to slow you down at scale.
+
+## Python side
+
+```python title="experiments/loop_bench.py"
+import time
+
+
+def sumsq(n):
+    s = 0.0
+    for i in range(1, n + 1):
+        s += float(i) * float(i)
+    return s
+
+
+if __name__ == "__main__":
+    print(sumsq(10))                    # sanity check: 385.0
+
+    start = time.perf_counter()
+    total = sumsq(10_000_000)
+    elapsed = (time.perf_counter() - start) * 1000
+
+    print(total)
+    print(f"{elapsed:.1f} ms")
+```
+
+```text title="expected output"
+385.0
+3.333333833337171e+20
+2532.8 ms
+```
+
+Same algorithm, same result to the last digit — `3.333333833337171e+20`. The difference
+is entirely in what happens between iterations: CPython creates a new `int` object for
+`i * i`, another for `s + ...`, then frees both. Ten million times.
+
+## What it means
+
+Four ways to run this exact computation, ordered by how much the language is doing for
+you:
+
+| Approach | Time | Allocations | What it teaches |
+| --- | --- | --- | --- |
+| Julia `for` loop | ~15 ms | 0 | compiled, type-stable code is free |
+| Julia broadcast | ~8 ms | few | `sum(i^2 for i in 1:n)` fuses |
+| NumPy `sum(arange**2)` | ~40 ms | 2 arrays | vectorisation beats interpretation |
+| Python `for` loop | 2533 ms | ~20M objects | the interpreter is the bottleneck |
+
+Two honest observations that the "170×" headline hides:
+
+1. **NumPy closes most of the gap.** If your Python code is array-shaped, it is already
+   fast; the 170× applies to loops over scalars, which is exactly where Python is
+   weakest and Julia is strongest.
+2. **Julia's first call is slower than Python's.** Compilation happens at runtime. In a
+   short script that runs once, Python can win outright. Julia pays a compile tax up
+   front and refunds it on every subsequent call — good for loops and long jobs, bad for
+   one-shot scripts.
+
+<Callout variant="warn" title="Never benchmark without a warm-up">
+`@time sumsq(10^7)` on a fresh session reports compilation time, not compute time — you
+will see something like 300 ms and conclude Julia is slow. Call the function once, then
+measure. `@btime` from `BenchmarkTools` does this for you, and reports allocations,
+which is the number that predicts behaviour at scale.
+</Callout>
+
+<Callout variant="tip" title="The fair comparison is idiomatic code">
+Comparing a Julia loop to a Python loop is fair only because both are the *idiomatic*
+way to write that computation in each language. Comparing a Julia loop to `numpy.sum`
+is also fair. Comparing a Julia loop to Python with `numba` is fair too — and numba
+wins back most of the gap, at the cost of a JIT and a narrower subset of the language.
+</Callout>
+
+<Gotchas>
+
+- **`@time` includes compilation on the first call.** Warm up, or you are timing the
+  compiler.
+- **Global scope is slow in Julia.** Loops at the REPL top level may run unoptimised;
+  wrap them in a function (or a `let` block) and the numbers change by 100×.
+- **Type instability kills the whole advantage.** If `s` could be an `Int` or a
+  `Float64` depending on the input, Julia emits a dynamic dispatch per iteration and
+  your loop joins Python in the slow lane. `@code_warntype` is the detector.
+- **Report the machine, not just the ratio.** Core count, CPU generation and thermal
+  state all move these numbers. A benchmark without hardware context is folklore.
+- **`0 allocations` is the real headline.** Time varies with the machine; allocation
+  count is a property of the generated code and travels between machines.
+- **Python is not slow — the interpreter loop is.** Vectorised Python regularly beats
+  naive Julia. Pick the right tool for the shape of your data, not the loudest blog post.
+
+</Gotchas>

@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+build/
+next-env.d.ts
+*.tsbuildinfo
+
+# misc
+.DS_Store
+*.pem
+.vercel
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# env
+.env
+.env*.local
+
+# julia
+Manifest.toml
+*.cov
+.julia/

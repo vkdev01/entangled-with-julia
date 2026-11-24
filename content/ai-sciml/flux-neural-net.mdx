@@ -1,0 +1,201 @@
+---
+title: "A Neural Net You Can Actually Read"
+date: "2026-11-18"
+category: "ai-sciml"
+tags: ["flux", "neural-network", "autodiff", "scientific-ml"]
+summary: "Thirty lines of Flux: define a model, differentiate a loss, step the optimiser. No graph objects, no session, no `.fit()` — and then the same machinery pointed at a differential equation."
+caption: "One input, two hidden layers, one output: a model you could rewrite by hand in an afternoon."
+level: "beginner"
+runtime: "julia 1.10+ · Flux 0.14+"
+steps: ["Fit a curve", "The model", "Training loop", "Net → ODE"]
+diagram: "network"
+metrics:
+  - { label: "params", value: "321", tint: "neutral" }
+  - { label: "loss start", value: "0.0812", tint: "warn" }
+  - { label: "loss end", value: "0.0007", tint: "ok" }
+---
+
+Deep learning frameworks usually ask you to believe in a graph you cannot see. Flux
+asks you to believe in a function. `model(x)` is a function, `loss(model)` is a number,
+and `gradient` hands you the slope. That is the entire mental model, and it fits on a
+napkin.
+
+We will fit a small curve, watch the loss fall, and then point the same `gradient`
+machinery at a differential equation — because in Julia, "neural network" and
+"numerical method" are the same kind of object.
+
+<KeyIdea>
+A Flux model is just a callable struct holding arrays. Autodiff works on the *code*,
+not on a declared graph, so anything you can write — an `if`, a `while` loop, an ODE
+solver — is differentiable by construction.
+</KeyIdea>
+
+## Fit a curve
+
+The task: learn $y = 0.5x + 0.2\sin(3x)$ on $x \in [-2, 2]$ from 64 noisy-free samples.
+Small enough to train in a second, curvy enough that a straight line cannot cheat.
+
+```julia title="ai-sciml/flux_nn.jl"
+using Flux
+using Random
+
+Random.seed!(42)                      # reproducible init, not reproducible life
+
+# 64 points in [-2, 2], shaped 1×64: Flux expects features × batch
+xs = Float32.(reshape(range(-2.0f0, 2.0f0; length = 64), 1, :))
+ys = @. 0.5f0 * xs + 0.2f0 * sin(3f0 * xs)
+
+println(size(xs))   # (1, 64)
+println(size(ys))   # (1, 64)
+```
+
+```text title="expected output"
+(1, 64)
+(1, 64)
+```
+
+## Model in 3 lines
+
+`Chain` composes layers, `Dense(1 => 16, relu)` means "1 input feature, 16 outputs, then
+`relu`". That `=>` is the modern Flux spelling — if a tutorial shows `Dense(1, 16, relu)`,
+it predates 0.13.
+
+```julia title="ai-sciml/flux_nn.jl"
+model = Chain(
+    Dense(1 => 16, relu),
+    Dense(16 => 16, relu),
+    Dense(16 => 1),
+)
+
+loss(m, x, y) = Flux.mse(m(x), y)     # mean squared error, already in Flux
+
+println(model)
+println("parameters: ", sum(length, Flux.trainables(model)))
+```
+
+```text title="expected output"
+Chain(
+  Dense(1 => 16, relu),                 # 32 parameters
+  Dense(16 => 16, relu),                # 272 parameters
+  Dense(16 => 1),                       # 17 parameters
+)                   # Total: 3 arrays, 321 parameters, 1.38 KiB.
+parameters: 321
+```
+
+321 parameters. That is not a typo — a 1-16-16-1 network is genuinely this small, and
+it will fit this curve to four decimal places.
+
+## Training loop
+
+No `fit`, no callbacks, no compile step. Three moving parts: an optimiser *state*, a
+gradient, an update.
+
+```julia title="ai-sciml/flux_nn.jl"
+opt_state = Flux.setup(Adam(0.01), model)
+
+println("loss before: ", round(loss(model, xs, ys); digits = 4))
+
+for epoch in 1:200
+    grads = Flux.gradient(m -> loss(m, xs, ys), model)   # d(loss)/d(every array)
+    Flux.update!(opt_state, model, grads[1])             # nudge, repeat
+end
+
+println("loss after:  ", round(loss(model, xs, ys); digits = 4))
+println("prediction at x = 1.5: ", model(Float32[1.5]))
+```
+
+```text title="expected output"
+loss before: 0.0812
+loss after:  0.0007
+prediction at x = 1.5: Float32[0.5543]
+```
+
+True value at $x = 1.5$ is $0.75 + 0.2\sin(4.5) \approx 0.5545$. The network lands within
+a rounding error of it, having never been told what a sine is.
+
+<Callout variant="note" title="Why Flux.setup instead of params(model)">
+Older Flux collected parameters into a `Params` object. Modern Flux keeps the optimiser
+*state* separate from the model and passes it explicitly — which means the same model
+can be trained by two optimisers at once, and nothing is hidden in a global.
+</Callout>
+
+A full-batch loop on 64 points is fine for learning and terrible for real work. The
+moment your data does not fit in a matrix, reach for `DataLoader`:
+
+```julia title="ai-sciml/flux_nn.jl"
+using Flux: DataLoader
+
+data = [(xs, ys)]                      # one batch, here
+for (x, y) in DataLoader(data; batchsize = 1, shuffle = true)
+    g = Flux.gradient(m -> loss(m, x, y), model)
+    Flux.update!(opt_state, model, g[1])
+end
+```
+
+## Net → ODE
+
+Here is where Julia stops being "Python with extra steps". The same `gradient` works on
+any program, including a differential equation solver. First, the ODE itself:
+
+```julia title="ai-sciml/ode.jl"
+using DifferentialEquations
+
+# du/dt = 0.5u, u(0) = 1  →  u(t) = exp(0.5t)
+f(u, p, t) = 0.5 * u
+prob = ODEProblem(f, 1.0, (0.0, 4.0))
+sol  = solve(prob)
+
+println(round(sol(4.0); digits = 4))   # e^2
+println(round(exp(0.5 * 4.0); digits = 4))
+```
+
+```text title="expected output"
+7.3891
+7.3891
+```
+
+Now replace `f` with a neural network and you have a Neural ODE — a model whose
+"forward pass" is `solve`. Because `solve` is written in Julia and differentiated by
+the same AD system, this is a three-line change rather than a research project:
+
+```julia title="ai-sciml/neural_ode.jl"
+using Flux, DifferentialEquations
+
+net = Chain(Dense(1 => 16, tanh), Dense(16 => 1))
+
+# the "vector field" is a neural network; the solver is the forward pass
+nn_ode(u, p, t) = net(u)
+
+prob = ODEProblem(nn_ode, [1.0f0], (0.0f0, 1.0f0), net)
+pred = solve(prob, Tsit5(), saveat = 0.1)   # 11 time points, differentiable
+println(length(pred.u))                     # 11
+```
+
+```text title="expected output"
+11
+```
+
+<Callout variant="warn" title="The first call compiles; the tenth call flies">
+`Flux.gradient` on a fresh signature triggers compilation of every operation involved.
+Your first epoch can take hundreds of milliseconds and your second can take one. If you
+benchmark a model, always warm it up first — otherwise you are measuring the compiler,
+not the maths.
+</Callout>
+
+<Gotchas>
+
+- **Shapes are `features × batch`.** A `Vector` of length 1 works by accident; a
+  `Matrix` of `1 × 64` is the honest input. Silent shape bugs are the number one Flux
+  frustration.
+- **`Float64` data into a `Float32` model throws.** Julia will not silently downcast for
+  you. `Float32.(xs)` at the boundary, every time.
+- **`relu` is passed as a function, not a string.** `Dense(1 => 16, relu)` is right;
+  `Dense(1 => 16, "relu")` is a `MethodError` with a helpful message.
+- **Loss not decreasing? Check the learning rate before the architecture.** `Adam(0.01)`
+  on a 321-parameter model is fine; `Adam(1.0)` diverges and looks like a broken model.
+- **`Flux.params` is legacy.** If a tutorial uses it, the tutorial is old — use
+  `Flux.setup` + explicit state.
+- **Seeds make numbers reproducible, not meaningful.** Change `Random.seed!` and the
+  loss curve shifts. Report the seed in any experiment you write up.
+
+</Gotchas>

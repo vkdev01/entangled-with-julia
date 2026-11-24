@@ -1,0 +1,190 @@
+---
+title: "Two Qubits, One Promise"
+date: "2026-11-11"
+category: "quantum"
+tags: ["yao", "quantum", "entanglement", "simulation"]
+summary: "Build a Bell state in Yao.jl, print its amplitudes, and measure it a thousand times. The whole of quantum computing's weirdness — superposition, entanglement, collapse — in nine lines of code you can run today."
+caption: "H, then CNOT. Two gates that turn two independent qubits into a single correlated pair."
+level: "beginner"
+runtime: "julia 1.10+ · Yao 0.8+"
+steps: ["The promise", "Build it", "Look at it", "Measure it"]
+diagram: "circuit"
+metrics:
+  - { label: "amplitudes", value: "4", tint: "neutral" }
+  - { label: "nonzero", value: "2", tint: "ok" }
+  - { label: "outcomes", value: "00 · 11", tint: "neutral" }
+---
+
+Classical bits are boringly independent. Set one to 1 and the other does not care.
+A Bell state is the smallest possible counterexample: two qubits that have agreed, in
+advance and without a channel, to always give the *same* answer — and to have given
+neither answer until you ask.
+
+You can simulate the whole thing on a laptop. Nine lines, no hardware, no cryostat.
+
+<KeyIdea>
+Entanglement is not a signal between qubits. It is a property of the joint state
+vector: $(\lvert 00\rangle + \lvert 11\rangle)/\sqrt{2}$ cannot be written as a product
+of two single-qubit states. That algebraic fact — not spooky communication — is what
+all the experiments test.
+</KeyIdea>
+
+## The promise
+
+The recipe is two gates on two qubits:
+
+1. **H** on qubit 1 — puts it in an even superposition of $\lvert 0\rangle$ and $\lvert 1\rangle$.
+2. **CNOT** (controlled-X) with qubit 1 as control, qubit 2 as target — flips qubit 2
+   *only if* qubit 1 is 1.
+
+Alone, each gate is unremarkable. Together they produce a state where qubit 2 is a
+perfect copy of qubit 1, and neither has a definite value.
+
+## Build it
+
+Yao composes circuits the way Julia composes functions: small pieces, `|>` to feed
+one into the next.
+
+```julia title="quantum/bell_yao.jl"
+using Yao
+
+# chain(2, ...) = a 2-qubit circuit; put(1 => H) applies H to qubit 1;
+# control(1, 2 => X) is CNOT with control 1, target 2
+circuit = chain(2, put(1 => H), control(1, 2 => X))
+
+state = zero_state(2) |> circuit      # |00⟩ through the circuit
+println(state)
+```
+
+```text title="expected output"
+ArrayReg{2, ComplexF64, Array...}
+    active qubits: 2/2
+    nlevel: 2
+```
+
+That is a register, not a table of answers. The interesting part is the amplitude
+vector behind it:
+
+```julia title="quantum/bell_yao.jl"
+ψ = statevec(state)
+println(ψ)
+println("probabilities: ", round.(abs2.(ψ); digits = 3))
+```
+
+```text title="expected output"
+ComplexF64[0.7071067811865475 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im, 0.7071067811865475 + 0.0im]
+probabilities: [0.5, 0.0, 0.0, 0.5]
+```
+
+Four amplitudes for two qubits ($2^2$), and only the first and last are alive. The
+ordering is the one thing that trips everyone up: index 1 is $\lvert 00\rangle$, index 4
+is $\lvert 11\rangle$, with qubit 1 as the most significant bit — exactly like binary.
+
+<Callout variant="warn" title="Yao is 1-indexed too">
+`statevec(state)[1]` is the $\lvert 00\rangle$ amplitude, not $\lvert 01\rangle$. When
+you port code from Qiskit (little-endian, 0-indexed) the bit order *and* the index base
+change. Port the diagram, then re-derive the indices — do not translate them.
+</Callout>
+
+## Look at it
+
+You can prove the state is entangled, not just assert it. Three cheap checks:
+
+```julia title="quantum/bell_yao.jl"
+ψ = statevec(zero_state(2) |> chain(2, put(1 => H), control(1, 2 => X)))
+
+println("norm:        ", round(sum(abs2, ψ); digits = 6))     # 1.0 — probabilities sum to 1
+println("p(00) + p(11): ", round(abs2(ψ[1]) + abs2(ψ[4]); digits = 6))
+println("p(01) + p(10): ", round(abs2(ψ[2]) + abs2(ψ[3]); digits = 6))
+```
+
+```text title="expected output"
+norm:        1.0
+p(00) + p(11): 1.0
+p(01) + p(10): 0.0
+```
+
+A product state would put weight on all four. This one puts weight on exactly two, and
+those two are correlated. Now change one gate and watch it break:
+
+```julia title="quantum/bell_yao.jl"
+# H on qubit 1 only: a product state, no correlation
+separable = zero_state(2) |> chain(2, put(1 => H))
+println("separable: ", round.(abs2.(statevec(separable)); digits = 3))
+# [0.5, 0.5, 0.0, 0.0] — qubit 2 is always 0, qubit 1 is a coin flip
+
+# H then Z: same probabilities, different phases — invisible until you interfere
+phased = zero_state(2) |> chain(2, put(1 => H), put(1 => Z))
+println("phased:    ", round.(real.(statevec(phased)); digits = 3))
+# [-0.707, 0.0, 0.0, 0.707]
+```
+
+```text title="expected output"
+separable: [0.5, 0.5, 0.0, 0.0]
+phased:    [-0.707, 0.0, 0.0, 0.707]
+```
+
+## Measure it
+
+Measurement collapses the register. Simulate it 1000 times and count:
+
+```julia title="quantum/bell_yao.jl"
+results = measure(state; nshots = 1000)
+
+counts = Dict{Int, Int}()
+for r in results
+    counts[r] = get(counts, r, 0) + 1
+end
+
+println(sort(collect(counts)))   # Int bit patterns: 0b00 = 0, 0b11 = 3
+println("distinct outcomes: ", length(counts))
+```
+
+```text title="expected output"
+[0 => 498, 3 => 502]
+distinct outcomes: 2
+```
+
+Run it again and you get different numbers — but always two outcomes, never one, never
+four. That is the promise: perfect correlation, no communication, no hidden variable
+that survives the statistics.
+
+Generalise to $n$ qubits and you have a GHZ state — the same trick, longer:
+
+```julia title="quantum/bell_yao.jl"
+ghz(n) = chain(n, put(1 => H), [control(1, i => X) for i in 2:n]...)
+
+ψ3 = statevec(zero_state(3) |> ghz(3))
+println("nonzero amplitudes: ", count(!iszero, ψ3))     # 2
+println("first: ", round(abs2(ψ3[1]); digits = 3))      # 0.5
+println("last:  ", round(abs2(ψ3[end]); digits = 3))    # 0.5
+```
+
+```text title="expected output"
+nonzero amplitudes: 2
+first: 0.5
+last:  0.5
+```
+
+Two nonzero amplitudes out of eight. Every added qubit doubles the state vector and
+leaves the number of *real* branches at two — which is why 50 qubits is a data-centre
+problem and 5 is a Tuesday.
+
+<Gotchas>
+
+- **Bit order is little-endian in Qiskit, qubit-1-most-significant in Yao.** Same
+  circuit, different `statevec`. Always print the amplitudes before you trust a port.
+- **`measure` without `nshots` gives one outcome**, not a distribution. Pass
+  `nshots = 1000` when you want statistics.
+- **`zero_state(n)` is not `zeros(2^n)`.** It is a register with qubit metadata; wrap
+  raw vectors with `ArrayReg` if you must build one by hand.
+- **Global phase is invisible.** $\lvert\psi\rangle$ and $-\lvert\psi\rangle$ give
+  identical probabilities. If a test compares amplitude vectors, compare `abs2` unless
+  you specifically care about phase.
+- **`control(1, 2 => X)` reads as "controlled by 1, X on 2"** — the control comes
+  first, the target is on the right of `=>`. Reversed, you get a different circuit that
+  is easy to mistake for the right one on paper.
+- **Simulation is exponential.** Each qubit doubles the vector. 20 qubits is fine,
+  30 is a workstation, 40 needs a cluster — and no amount of Julia makes it free.
+
+</Gotchas>

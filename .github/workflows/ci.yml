@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  web:
+    name: build the site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  julia:
+    name: run the basics script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+      # the basics script only needs the standard library, so this job stays fast.
+      # the full project (Flux, Yao, DifferentialEquations) is instantiated by hand —
+      # see "Running the Julia side" in the README.
+      - run: julia julia/basics/indexing_dispatch.jl
