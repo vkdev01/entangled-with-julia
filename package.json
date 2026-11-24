@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "start": "npx serve out",
+    "typecheck": "tsc --noEmit",
+    "build:pages": "GITHUB_PAGES=true next build",
+    "preview": "npx serve out"
   },
   "dependencies": {
     "@mdx-js/mdx": "^3.1.0",

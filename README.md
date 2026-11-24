@@ -12,6 +12,8 @@ has an expected output. Every expected output has a gotcha.
 basics → dispatch → Flux → Yao → benchmarks
 ```
 
+**Live site:** https://vkdev01.github.io/entangled-with-julia/
+
 ---
 
 ## What's inside
@@ -65,7 +67,9 @@ Julia with comments, the output you should see, and a **Gotchas & takeaways** se
 ```bash
 npm install
 npm run dev          # http://localhost:3000
-npm run build        # static build; every note is pre-rendered
+npm run build        # static export into out/ ; every note is pre-rendered
+npm run build:pages  # same, but built for the /entangled-with-julia/ subpath
+npm run preview      # serve out/ locally
 ```
 
 Node 20+. The site reads `content/**/*.mdx` at build time — no database, no CMS.
